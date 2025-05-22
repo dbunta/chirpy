@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"regexp"
 	"sync/atomic"
 )
 
@@ -13,9 +16,10 @@ func main() {
 	//mux.Handle("/app", http.StripPrefix("/app", http.FileServer(http.Dir("."))))
 	handler := handlerMain()
 	mux.Handle("/app/", apiConfig.middlewareMetricsInc(handler))
-	mux.HandleFunc("GET /healthz", handlerHealthz)
-	mux.HandleFunc("GET /metrics", apiConfig.handlerMetrics)
-	mux.HandleFunc("POST /reset", apiConfig.handlerReset)
+	mux.HandleFunc("GET /api/healthz", handlerHealthz)
+	mux.HandleFunc("GET /admin/metrics", apiConfig.handlerMetrics)
+	mux.HandleFunc("POST /admin/reset", apiConfig.handlerReset)
+	mux.HandleFunc("POST /api/validate_chirp", handlerValidateChirp)
 
 	server := &http.Server{
 		Handler: mux,
@@ -52,13 +56,73 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func (cfg *apiConfig) handlerMetrics(rw http.ResponseWriter, req *http.Request) {
-	rw.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(200)
-	rw.Write([]byte(fmt.Sprintf("Hits: %v", cfg.fileServerHits.Load())))
+	html := fmt.Sprintf(`
+		<html>
+		<body>
+			<h1>Welcome, Chirpy Admin</h1>
+			<p>Chirpy has been visited %d times!</p>
+		</body>
+		</html>	
+	`, cfg.fileServerHits.Load())
+	rw.Write([]byte(html))
 }
 
 func (cfg *apiConfig) handlerReset(rw http.ResponseWriter, req *http.Request) {
-	rw.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	rw.WriteHeader(200)
 	cfg.fileServerHits.Store(0)
+}
+
+func handlerValidateChirp(rw http.ResponseWriter, req *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
+	type errorRes struct {
+		Error string `json:"error"`
+	}
+	type successRes struct {
+		CleanedBody string `json:"cleaned_body"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+
+		res := errorRes{
+			Error: "Something went wrong",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(500)
+		rw.Write(dat)
+		return
+	}
+
+	if len(params.Body) > 140 {
+		res := errorRes{
+			Error: "Chirp is too long",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(400)
+		rw.Write(dat)
+		return
+	}
+
+	replace := "****"
+	re := regexp.MustCompile("(?i)" + "kerfuffle|sharbert|fornax")
+	params.Body = re.ReplaceAllString(params.Body, replace)
+	res := successRes{
+		CleanedBody: params.Body,
+	}
+	dat, _ := json.Marshal(res)
+	rw.Header().Add("Content-Type", "application/json")
+	rw.WriteHeader(200)
+	rw.Write(dat)
 }
