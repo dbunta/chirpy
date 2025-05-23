@@ -33,8 +33,8 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", handlerHealthz)
 	mux.HandleFunc("GET /admin/metrics", apiConfig.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiConfig.handlerReset)
-	mux.HandleFunc("POST /api/validate_chirp", handlerValidateChirp)
 	mux.HandleFunc("POST /api/users", apiConfig.handlerCreateUser)
+	mux.HandleFunc("POST /api/chirps", apiConfig.handlerCreateChirp)
 
 	server := &http.Server{
 		Handler: mux,
@@ -94,6 +94,7 @@ func (cfg *apiConfig) handlerReset(rw http.ResponseWriter, req *http.Request) {
 	}
 	err := cfg.dbQueries.DeleteUsers(req.Context())
 	if err != nil {
+		log.Printf("%s", err)
 		res := errorRes{
 			Error: "Something went wrong",
 		}
@@ -113,55 +114,6 @@ type errorRes struct {
 	Error string `json:"error"`
 }
 
-func handlerValidateChirp(rw http.ResponseWriter, req *http.Request) {
-	type parameters struct {
-		Body string `json:"body"`
-	}
-	type successRes struct {
-		CleanedBody string `json:"cleaned_body"`
-	}
-
-	decoder := json.NewDecoder(req.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		log.Printf("Error decoding parameters: %s", err)
-
-		res := errorRes{
-			Error: "Something went wrong",
-		}
-		dat, _ := json.Marshal(res)
-
-		rw.Header().Set("Content-Type", "application/json")
-		rw.WriteHeader(500)
-		rw.Write(dat)
-		return
-	}
-
-	if len(params.Body) > 140 {
-		res := errorRes{
-			Error: "Chirp is too long",
-		}
-		dat, _ := json.Marshal(res)
-
-		rw.Header().Set("Content-Type", "application/json")
-		rw.WriteHeader(400)
-		rw.Write(dat)
-		return
-	}
-
-	replace := "****"
-	re := regexp.MustCompile("(?i)" + "kerfuffle|sharbert|fornax")
-	params.Body = re.ReplaceAllString(params.Body, replace)
-	res := successRes{
-		CleanedBody: params.Body,
-	}
-	dat, _ := json.Marshal(res)
-	rw.Header().Add("Content-Type", "application/json")
-	rw.WriteHeader(200)
-	rw.Write(dat)
-}
-
 func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Request) {
 	type parameters struct {
 		Email string `json:"email"`
@@ -176,6 +128,7 @@ func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Reques
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
+		log.Printf("%s", err)
 		res := errorRes{
 			Error: "Something went wrong",
 		}
@@ -189,6 +142,7 @@ func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Reques
 
 	user, err := cfg.dbQueries.CreateUser(req.Context(), params.Email)
 	if err != nil {
+		log.Printf("%s", err)
 		res := errorRes{
 			Error: "Something went wrong",
 		}
@@ -211,4 +165,84 @@ func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Reques
 	rw.WriteHeader(201)
 	rw.Write(dat)
 	return
+}
+
+func (cfg *apiConfig) handlerCreateChirp(rw http.ResponseWriter, req *http.Request) {
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
+	}
+	type successRes struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserId    uuid.UUID `json:"user_id"`
+	}
+
+	decoder := json.NewDecoder(req.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+
+		res := errorRes{
+			Error: "Something went wrong here",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(500)
+		rw.Write(dat)
+		return
+	}
+
+	if len(params.Body) > 140 {
+		log.Printf("Chirp is too long")
+		res := errorRes{
+			Error: "Chirp is too long",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(400)
+		rw.Write(dat)
+		return
+	}
+
+	replace := "****"
+	re := regexp.MustCompile("(?i)" + "kerfuffle|sharbert|fornax")
+	params.Body = re.ReplaceAllString(params.Body, replace)
+
+	newChirpParams := database.CreateChirpParams{
+		Body:   params.Body,
+		UserID: params.UserID,
+	}
+
+	newChirp, err := cfg.dbQueries.CreateChirp(req.Context(), newChirpParams)
+	if err != nil {
+		log.Printf("%s", err)
+		res := errorRes{
+			Error: "Something went wrong here instead",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(500)
+		rw.Write(dat)
+		return
+	}
+
+	res := successRes{
+		Id:        newChirp.ID,
+		CreatedAt: newChirp.CreatedAt,
+		UpdatedAt: newChirp.UpdatedAt,
+		Body:      newChirp.Body,
+		UserId:    newChirp.UserID,
+	}
+
+	dat, _ := json.Marshal(res)
+	rw.Header().Add("Content-Type", "application/json")
+	rw.WriteHeader(201)
+	rw.Write(dat)
 }
