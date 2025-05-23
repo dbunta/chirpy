@@ -35,6 +35,8 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiConfig.handlerReset)
 	mux.HandleFunc("POST /api/users", apiConfig.handlerCreateUser)
 	mux.HandleFunc("POST /api/chirps", apiConfig.handlerCreateChirp)
+	mux.HandleFunc("GET /api/chirps", apiConfig.handlerGetAllChirps)
+	mux.HandleFunc("GET /api/chirps/{chirpId}", apiConfig.handlerGetChirp)
 
 	server := &http.Server{
 		Handler: mux,
@@ -244,5 +246,83 @@ func (cfg *apiConfig) handlerCreateChirp(rw http.ResponseWriter, req *http.Reque
 	dat, _ := json.Marshal(res)
 	rw.Header().Add("Content-Type", "application/json")
 	rw.WriteHeader(201)
+	rw.Write(dat)
+}
+
+func (cfg *apiConfig) handlerGetAllChirps(rw http.ResponseWriter, req *http.Request) {
+	type successRes struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserId    uuid.UUID `json:"user_id"`
+	}
+	chirps, err := cfg.dbQueries.GetAllChirps(req.Context())
+	if err != nil {
+		log.Printf("%s", err)
+		res := errorRes{
+			Error: "Something went wrong here instead",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(500)
+		rw.Write(dat)
+		return
+	}
+
+	var retval []successRes
+	for _, val := range chirps {
+		res := successRes{
+			Id:        val.ID,
+			CreatedAt: val.CreatedAt,
+			UpdatedAt: val.UpdatedAt,
+			Body:      val.Body,
+			UserId:    val.UserID,
+		}
+		retval = append(retval, res)
+	}
+
+	dat, _ := json.Marshal(retval)
+	rw.Header().Add("Content-Type", "application/json")
+	rw.WriteHeader(200)
+	rw.Write(dat)
+}
+
+func (cfg *apiConfig) handlerGetChirp(rw http.ResponseWriter, req *http.Request) {
+	type successRes struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserId    uuid.UUID `json:"user_id"`
+	}
+
+	chirpId, _ := uuid.Parse(req.PathValue("chirpId"))
+
+	chirp, err := cfg.dbQueries.GetChirp(req.Context(), chirpId)
+	if err != nil {
+		log.Printf("error fetching chirp: %w", err)
+		res := errorRes{
+			Error: "error fetching chirp",
+		}
+		dat, _ := json.Marshal(res)
+
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(404)
+		rw.Write(dat)
+		return
+	}
+
+	retval := successRes{
+		Id:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserId:    chirp.UserID,
+	}
+	dat, _ := json.Marshal(retval)
+	rw.Header().Add("Content-Type", "application/json")
+	rw.WriteHeader(200)
 	rw.Write(dat)
 }
