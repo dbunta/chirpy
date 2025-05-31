@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dbunta/chirpy/internal/auth"
 	"github.com/dbunta/chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -37,6 +38,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiConfig.handlerCreateChirp)
 	mux.HandleFunc("GET /api/chirps", apiConfig.handlerGetAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpId}", apiConfig.handlerGetChirp)
+	mux.HandleFunc("POST /api/login", apiConfig.handlerLogin)
 
 	server := &http.Server{
 		Handler: mux,
@@ -118,7 +120,8 @@ type errorRes struct {
 
 func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	type successRes struct {
 		Id        uuid.UUID `json:"id"`
@@ -142,7 +145,12 @@ func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	user, err := cfg.dbQueries.CreateUser(req.Context(), params.Email)
+	hashedPassword, _ := auth.HashPassword(params.Password)
+	createUserParams := database.CreateUserParams{
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+	}
+	user, err := cfg.dbQueries.CreateUser(req.Context(), createUserParams)
 	if err != nil {
 		log.Printf("%s", err)
 		res := errorRes{
@@ -323,6 +331,70 @@ func (cfg *apiConfig) handlerGetChirp(rw http.ResponseWriter, req *http.Request)
 	}
 	dat, _ := json.Marshal(retval)
 	rw.Header().Add("Content-Type", "application/json")
+	rw.WriteHeader(200)
+	rw.Write(dat)
+}
+
+func (cfg *apiConfig) handlerLogin(rw http.ResponseWriter, req *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	decoder := json.NewDecoder(req.Body)
+	var params parameters
+	err := decoder.Decode(&params)
+	if err != nil {
+		log.Printf("Error decoding parameters: %s", err)
+		res := errorRes{
+			Error: "Something went wrong here",
+		}
+		dat, _ := json.Marshal(res)
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(500)
+		rw.Write(dat)
+		return
+	}
+
+	user, err := cfg.dbQueries.GetUser(req.Context(), params.Email)
+	if err != nil {
+		log.Printf("Error getting user: %w", err)
+		res := errorRes{
+			Error: "Something went wrong",
+		}
+		dat, _ := json.Marshal(res)
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(500)
+		rw.Write(dat)
+		return
+	}
+
+	err = auth.CheckPassword(user.HashedPassword, params.Password)
+	if err != nil {
+		res := errorRes{
+			Error: "Incorrect password",
+		}
+		dat, _ := json.Marshal(res)
+		rw.Header().Set("Content-Type", "application/json")
+		rw.WriteHeader(401)
+		rw.Write(dat)
+		return
+	}
+
+	type successRes struct {
+		Id        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	res := successRes{
+		Id:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	}
+	dat, _ := json.Marshal(res)
+	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(200)
 	rw.Write(dat)
 }
