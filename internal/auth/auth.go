@@ -1,7 +1,11 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -40,10 +44,6 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 	return tokenString, nil
 }
 
-// not sure how i feel about this keyboard but i'll give it a chance
-// it's not as rattly as I remember, I wonder if it was lubed.
-// i think it may have been lubed at some point
-// i think at some point it may have been lubed 9999999999999999999999
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	//var claims jwt.RegisteredClaims
 	claims := jwt.MapClaims{}
@@ -51,11 +51,34 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		return []byte(tokenSecret), nil
 	})
 	if err != nil {
-		return uuid.New(), fmt.Errorf("ValidateJWT Error parsing token: %w", err)
+		return uuid.New(), fmt.Errorf("validateJWT error parsing token: %w", err)
 	}
 	id, err := token.Claims.GetSubject()
 	if err != nil {
-		return uuid.New(), fmt.Errorf("Validate JWT Error getting subject from token claims: %w", err)
+		return uuid.New(), fmt.Errorf("validate jwt error getting subject from token claims: %w", err)
 	}
 	return uuid.Parse(id)
+}
+
+func GetBearerToken(header http.Header) (string, error) {
+	authHeader := header.Get("Authorization")
+	if len(authHeader) == 0 {
+		return "", fmt.Errorf("authorization header missing")
+	}
+	token, found := strings.CutPrefix(authHeader, "Bearer ")
+	if !found {
+		return "", fmt.Errorf("authorization header in unexpected format")
+	}
+	return token, nil
+}
+
+func MakeRefreshToken() (string, error) {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	if err != nil {
+		return "", fmt.Errorf("error generating refresh token: %v", err)
+	}
+	retval := hex.EncodeToString(key)
+
+	return retval, nil
 }
