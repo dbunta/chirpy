@@ -40,6 +40,7 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiConfig.handlerCreateChirp)
 	mux.HandleFunc("GET /api/chirps", apiConfig.handlerGetAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpId}", apiConfig.handlerGetChirp)
+	mux.HandleFunc("DELETE /api/chirps/{chirpId}", apiConfig.handlerDeleteChirp)
 	mux.HandleFunc("POST /api/login", apiConfig.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", apiConfig.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke", apiConfig.handlerRevoke)
@@ -332,6 +333,22 @@ func (cfg *apiConfig) handlerGetAllChirps(rw http.ResponseWriter, req *http.Requ
 }
 
 func (cfg *apiConfig) handlerGetChirp(rw http.ResponseWriter, req *http.Request) {
+	/*
+		token, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			fmt.Printf("%v\n", err)
+			ReturnError(rw, "error getting bearer token", 401)
+			return
+		}
+
+		userId, err := auth.ValidateJWT(token, cfg.secret)
+		if err != nil {
+			fmt.Printf("%v\n", err)
+			ReturnError(rw, "error getting bearer token", 401)
+			return
+		}
+	*/
+
 	type successRes struct {
 		Id        uuid.UUID `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
@@ -355,6 +372,14 @@ func (cfg *apiConfig) handlerGetChirp(rw http.ResponseWriter, req *http.Request)
 		rw.Write(dat)
 		return
 	}
+
+	/*
+		if chirp.UserID != userId {
+			log.Print("aint your chipr")
+			ReturnError(rw, "aint your chirp", 404)
+			return
+		}
+	*/
 
 	retval := successRes{
 		Id:        chirp.ID,
@@ -601,4 +626,44 @@ func (cfg *apiConfig) handlerUpdateUser(rw http.ResponseWriter, req *http.Reques
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(200)
 	rw.Write(dat)
+}
+
+func (cfg *apiConfig) handlerDeleteChirp(rw http.ResponseWriter, req *http.Request) {
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error getting bearer token", 401)
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error getting bearer token", 401)
+		return
+	}
+
+	chirpId, _ := uuid.Parse(req.PathValue("chirpId"))
+
+	chirp, err := cfg.dbQueries.GetChirp(req.Context(), chirpId)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error getting chirp", 404)
+		return
+	}
+	if chirp.UserID != userId {
+		fmt.Printf("%v\n", "cannot delete a chirp you do not own")
+		ReturnError(rw, "cannot delete a chirp you do not own", 403)
+		return
+	}
+
+	err = cfg.dbQueries.DeleteChirp(req.Context(), chirpId)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error deleting chirp", 401)
+		return
+	}
+
+	rw.WriteHeader(204)
+
 }
