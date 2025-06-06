@@ -36,6 +36,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiConfig.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiConfig.handlerReset)
 	mux.HandleFunc("POST /api/users", apiConfig.handlerCreateUser)
+	mux.HandleFunc("PUT /api/users", apiConfig.handlerUpdateUser)
 	mux.HandleFunc("POST /api/chirps", apiConfig.handlerCreateChirp)
 	mux.HandleFunc("GET /api/chirps", apiConfig.handlerGetAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpId}", apiConfig.handlerGetChirp)
@@ -502,29 +503,6 @@ func (cfg *apiConfig) handlerRefresh(rw http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	/*
-		params := database.CreateRefreshTokenParams{
-			Token:     newToken,
-			UserID:    rt.UserID,
-			ExpiresAt: time.Now().UTC().Add(time.Hour * time.Duration(1)),
-		}
-		_, err = cfg.dbQueries.CreateRefreshToken(req.Context(), params)
-		if err != nil {
-			fmt.Printf("%v\n", err)
-			ReturnError(rw, "error saving new token", 500)
-			return
-		}
-	*/
-
-	/*
-		err = cfg.dbQueries.RevokeRefreshToken(req.Context(), token)
-		if err != nil {
-			fmt.Printf("%v\n", err)
-			ReturnError(rw, "error revoking old token", 500)
-			return
-		}
-	*/
-
 	type successRes struct {
 		Token string `json:"token"`
 	}
@@ -555,4 +533,72 @@ func (cfg *apiConfig) handlerRevoke(rw http.ResponseWriter, req *http.Request) {
 	}
 
 	rw.WriteHeader(204)
+}
+
+func (cfg *apiConfig) handlerUpdateUser(rw http.ResponseWriter, req *http.Request) {
+	token, err := auth.GetBearerToken(req.Header)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error getting bearer token", 401)
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error getting bearer token", 401)
+		return
+	}
+
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	decoder := json.NewDecoder(req.Body)
+	var params parameters
+	err = decoder.Decode(&params)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error decoding parameters", 500)
+		return
+	}
+
+	pwHash, err := auth.HashPassword(params.Password)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error hashing password", 500)
+		return
+	}
+
+	updateUserParams := database.UpdateUserParams{
+		ID:             userId,
+		Email:          params.Email,
+		HashedPassword: pwHash,
+	}
+	updatedUser, err := cfg.dbQueries.UpdateUser(req.Context(), updateUserParams)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error updating user", 500)
+		return
+	}
+
+	type SuccessRes struct {
+		ID             uuid.UUID `json:"id"`
+		CreatedAt      time.Time `json:"created_at"`
+		UpdatedAt      time.Time `json:"updated_at"`
+		Email          string    `json:"email"`
+		HashedPassword string    `json:"hashed_password"`
+	}
+	retval := SuccessRes{
+		ID:             updatedUser.ID,
+		CreatedAt:      updatedUser.CreatedAt,
+		UpdatedAt:      updatedUser.UpdatedAt,
+		Email:          updatedUser.Email,
+		HashedPassword: updatedUser.HashedPassword,
+	}
+
+	dat, _ := json.Marshal(retval)
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(200)
+	rw.Write(dat)
 }
