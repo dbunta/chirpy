@@ -67,3 +67,21 @@ func TestMakeRefreshToken(t *testing.T) {
 	}
 	fmt.Printf("token: %v\n", token)
 }
+
+func TestGetApiKey(t *testing.T) {
+	headers := http.Header{}
+	headers.Add("Authorization", "ApiKey thisisatest")
+	key, err := GetAPIKey(headers)
+	if err != nil {
+		t.Errorf("%v\n", err)
+	}
+	if key != "thisisatest" {
+		t.Errorf("expected: key = 'thisisatest', actual: key = '%v'", key)
+	}
+
+	headers.Set("Authorization", "thisisatest")
+	_, err = GetAPIKey(headers)
+	if err == nil {
+		t.Errorf("expected: error when getting malformed api key")
+	}
+}

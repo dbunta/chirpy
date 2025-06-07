@@ -17,3 +17,6 @@ select * from users where email = $1;
 
 -- name: UpdateUser :one
 update users set email = $1, hashed_password = $2 where id = $3 returning *;
+
+-- name: UpdateChirpyRed :one
+update users set is_chirpy_red = true where id = $1 returning *;

@@ -44,6 +44,7 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiConfig.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", apiConfig.handlerRefresh)
 	mux.HandleFunc("POST /api/revoke", apiConfig.handlerRevoke)
+	mux.HandleFunc("POST /api/polka/webhooks", apiConfig.handlerPolkaWebhooks)
 
 	server := &http.Server{
 		Handler: mux,
@@ -130,10 +131,11 @@ func (cfg *apiConfig) handlerCreateUser(rw http.ResponseWriter, req *http.Reques
 		Password string `json:"password"`
 	}
 	type successRes struct {
-		Id        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
+		Id          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 	decoder := json.NewDecoder(req.Body)
 	params := parameters{}
@@ -470,6 +472,7 @@ func (cfg *apiConfig) handlerLogin(rw http.ResponseWriter, req *http.Request) {
 		Email        string    `json:"email"`
 		Token        string    `json:"token"`
 		RefreshToken string    `json:"refresh_token"`
+		IsChirpyRed  bool      `json:"is_chirpy_red"`
 	}
 
 	res := successRes{
@@ -479,6 +482,7 @@ func (cfg *apiConfig) handlerLogin(rw http.ResponseWriter, req *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 	dat, _ := json.Marshal(res)
 	rw.Header().Set("Content-Type", "application/json")
@@ -613,6 +617,7 @@ func (cfg *apiConfig) handlerUpdateUser(rw http.ResponseWriter, req *http.Reques
 		UpdatedAt      time.Time `json:"updated_at"`
 		Email          string    `json:"email"`
 		HashedPassword string    `json:"hashed_password"`
+		IsChirpyRed    bool      `json:"is_chirpy_red"`
 	}
 	retval := SuccessRes{
 		ID:             updatedUser.ID,
@@ -620,6 +625,7 @@ func (cfg *apiConfig) handlerUpdateUser(rw http.ResponseWriter, req *http.Reques
 		UpdatedAt:      updatedUser.UpdatedAt,
 		Email:          updatedUser.Email,
 		HashedPassword: updatedUser.HashedPassword,
+		IsChirpyRed:    updatedUser.IsChirpyRed,
 	}
 
 	dat, _ := json.Marshal(retval)
@@ -666,4 +672,47 @@ func (cfg *apiConfig) handlerDeleteChirp(rw http.ResponseWriter, req *http.Reque
 
 	rw.WriteHeader(204)
 
+}
+
+func (cfg *apiConfig) handlerPolkaWebhooks(rw http.ResponseWriter, req *http.Request) {
+	key, err := auth.GetAPIKey(req.Header)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error getting api key", 401)
+		return
+	}
+	if key != os.Getenv("POLKA_KEY") {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "api keys do not match", 401)
+		return
+	}
+
+	type Parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserId uuid.UUID `json:"user_id"`
+		} `json:"data"`
+	}
+	decoder := json.NewDecoder(req.Body)
+	var params Parameters
+	err = decoder.Decode(&params)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error decoding parameters", 500)
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		ReturnError(rw, "we don't care about any other events", 204)
+		return
+	}
+
+	_, err = cfg.dbQueries.UpdateChirpyRed(req.Context(), params.Data.UserId)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		ReturnError(rw, "error updating user to chirpy red", 404)
+		return
+	}
+
+	rw.WriteHeader(204)
 }
