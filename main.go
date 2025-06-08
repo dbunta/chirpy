@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -295,6 +296,8 @@ func (cfg *apiConfig) handlerCreateChirp(rw http.ResponseWriter, req *http.Reque
 }
 
 func (cfg *apiConfig) handlerGetAllChirps(rw http.ResponseWriter, req *http.Request) {
+	authorId, authorIdErr := uuid.Parse(req.URL.Query().Get("author_id"))
+	sortOrder := req.URL.Query().Get("sort")
 	type successRes struct {
 		Id        uuid.UUID `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
@@ -318,6 +321,11 @@ func (cfg *apiConfig) handlerGetAllChirps(rw http.ResponseWriter, req *http.Requ
 
 	var retval []successRes
 	for _, val := range chirps {
+		//filter on author id if provided
+		if authorIdErr == nil && authorId != val.UserID {
+			continue
+		}
+
 		res := successRes{
 			Id:        val.ID,
 			CreatedAt: val.CreatedAt,
@@ -326,6 +334,10 @@ func (cfg *apiConfig) handlerGetAllChirps(rw http.ResponseWriter, req *http.Requ
 			UserId:    val.UserID,
 		}
 		retval = append(retval, res)
+	}
+
+	if sortOrder != "" && sortOrder == "desc" {
+		sort.Slice(retval, func(i, j int) bool { return retval[i].CreatedAt.After(retval[j].CreatedAt) })
 	}
 
 	dat, _ := json.Marshal(retval)
